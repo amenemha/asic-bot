@@ -236,8 +236,100 @@ async def cb_asic(c: types.CallbackQuery, state: FSMContext):
         await c.answer("Не нашёл этот ASIC", show_alert=True)
         return
 
+   @dp.callback_query(F.data.startswith("asic:"))
+async def cb_asic(c: types.CallbackQuery, state: FSMContext):
+    key = c.data.split(":", 1)[1]
+    if key == "manual":
+        await c.message.answer("Введи хешрейт в TH/s 💪\nНапример: 100, 200, 126")
+        await state.set_state(Calc.th)
+        await c.answer()
+        return
+
+    asic = ASICS.get(key)
+    if not asic:
+        await c.answer("Не нашёл этот ASIC", show_alert=True)
+        return
+
     th = asic["th"]
     watts = asic["w"]
-
     u = db.get_user(c.from_user.id)
-    if
+    if not u or not u[3]:
+        await state.update_data(th=th, watts=watts)
+        await c.message.answer(
+            "⚡️ Сколько у тебя стоит 1 кВт·ч в ₽?\n"
+            "Введи число (например: 4)\n\n"
+            "Я запомню для всех будущих расчётов.\n"
+            "Поменять можно в 🔧 Настройках."
+        )
+        await state.set_state(Calc.first_kwh)
+        await c.answer()
+        return
+
+    await state.clear()
+    await c.answer()
+    await do_calc(c.message, th, watts)
+
+
+@dp.message(Calc.th)
+async def calc_th(m: types.Message, state: FSMContext):
+    try:
+        th = float(m.text.replace(",", "."))
+    except Exception:
+        await m.answer("❌ Это не число.\nПример: 100 (TH/s) 👇")
+        return
+    await state.update_data(th=th)
+    await m.answer(
+        "🔌 Шаг 2/2 — потребление 🔋\n\n"
+        "Введи мощность ASIC в ваттах ⚡️\n"
+        "Примеры:\n3250\n3500\n3276\n\n"
+        "Просто отправь число 👇"
+    )
+    await state.set_state(Calc.watts)
+
+
+@dp.message(Calc.watts)
+async def calc_watts(m: types.Message, state: FSMContext):
+    try:
+        watts = float(m.text.replace(",", "."))
+    except Exception:
+        await m.answer("❌ Это не число.\nПример: 3500 (Вт) 👇")
+        return
+    data = await state.get_data()
+    th = data.get("th")
+    u = db.get_user(m.from_user.id)
+    if not u or not u[3]:
+        await state.update_data(watts=watts)
+        await m.answer(
+            "⚡️ Сколько у тебя стоит 1 кВт·ч в ₽?\n"
+            "Введи число (например: 4)\n\n"
+            "Я запомню для всех будущих расчётов."
+        )
+        await state.set_state(Calc.first_kwh)
+        return
+    await state.clear()
+    await do_calc(m, th, watts)
+
+
+@dp.message(Calc.first_kwh)
+async def first_kwh(m: types.Message, state: FSMContext):
+    try:
+        v = float(m.text.replace(",", "."))
+    except Exception:
+        await m.answer("❌ Это не число. Пример: 4")
+        return
+    db.set_kwh(m.from_user.id, v)
+    data = await state.get_data()
+    th = data.get("th")
+    watts = data.get("watts")
+    await state.clear()
+    await m.answer(f"✅ Запомнил: {v:g} ₽/кВт·ч")
+    if th and watts:
+        await do_calc(m, th, watts)
+
+
+async def main():
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
