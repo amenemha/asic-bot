@@ -69,10 +69,7 @@ class Calc(StatesGroup):
 
 class SettingsFSM(StatesGroup):
     kwh = State()
-    asic = State()
-
-
-async def do_calc(m: types.Message, th: float, watts: float):
+    asic = State()async def do_calc(m: types.Message, th: float, watts: float):
     u = db.get_user(m.from_user.id)
     kwh_price = u[3] if u and u[3] else 0
     asic_price = u[4] if u and u[4] else 0
@@ -89,29 +86,25 @@ async def do_calc(m: types.Message, th: float, watts: float):
     db.log_req(m.from_user.id, "calc", f"{th}/{watts}")
 
     text = (
-        f"📊 *Расчёт* — {th:g} TH/s ⛏  {watts:g} Вт ⚡️\n"
+        f"📊 Расчёт — {th:g} TH/s ⛏  {watts:g} Вт ⚡️\n"
         f"━━━━━━━━━━━━━━━━━━━\n"
         f"💰 Доход/сутки:\n"
         f"   {r['btc_day']:.8f} ₿\n"
-        f"   ${r['usd_day']:.2f}  |  {r['rub_day']:,.0f} ₽\n\n"
-        f"🔌 Электричество/сутки: {r['elec_day']:,.0f} ₽"
-    )
-    if kwh_price:
-        text += f" ({kwh_price:g} ₽/кВт·ч)"
-    text += (
-        f"\n📈 Чистая прибыль/сутки: *{r['profit_day']:,.0f} ₽*\n\n"
+        f"   ${r['usd_day']:.2f}  |  {r['rub_day']:,.0f} ₽\n"
+        f"🔌 Электричество/сутки: {r['elec_day']:,.0f} ₽\n"
+        f"📈 Чистая прибыль/сутки: {r['profit_day']:,.0f} ₽\n"
         f"🗓 В месяц: {r['month']:,.0f} ₽\n"
         f"📅 В год: {r['year']:,.0f} ₽"
     )
     if r["payback_days"]:
-        text += f"\n\n⏳ Окупаемость: *{r['payback_days']:,.0f} дней* (~{r['payback_days']/30:.1f} мес) ✅"
+        text += f"\n⏳ Окупаемость: {r['payback_days']:,.0f} дней (~{r['payback_days']/30:.1f} мес) ✅"
     elif asic_price:
-        text += "\n\n⚠️ Окупаемость: убыточно при текущих параметрах"
+        text += "\n⚠️ Окупаемость: убыточно при текущих параметрах"
     else:
-        text += "\n\nℹ️ Укажи цену ASIC в 🔧 Настройках для расчёта окупаемости"
+        text += "\nℹ️ Укажи цену ASIC в 🔧 Настройках для расчёта окупаемости"
 
     text = text.replace(",", " ")
-    await m.answer(text, reply_markup=main_kb(), parse_mode="Markdown")
+    await m.answer(text, reply_markup=main_kb())
 
 
 @dp.message(CommandStart())
@@ -133,19 +126,16 @@ async def show_rates(m: types.Message):
     btc = await rates.btc_usd()
     eth = await rates.eth_usd()
     rub = await rates.usd_rub()
-    lines = ["💹 *Курс*", "━━━━━━━━━"]
+    lines = ["💹 Курс", "━━━━━━━━━"]
     lines.append(f"{btc:,.0f} BTC/USDT".replace(",", " ") if btc else "BTC/USDT — нет данных")
     lines.append(f"{rub:.2f} RUB/USDT" if rub else "RUB/USDT — нет данных")
     lines.append(f"{eth:,.0f} ETH/USDT".replace(",", " ") if eth else "ETH/USDT — нет данных")
-    await m.answer("\n".join(lines), parse_mode="Markdown")
+    await m.answer("\n".join(lines))
 
 
 @dp.message(F.text == "⚙️ Аппараты")
 async def asics_info(m: types.Message):
-    await m.answer(
-        "⛏ Список ASIC скоро появится.\n"
-        "Пока введи параметры вручную через 🧮 Рассчитать."
-    )
+    await m.answer("⛏ Список ASIC скоро появится.\nПока введи параметры вручную через 🧮 Рассчитать.")
 
 
 @dp.message(F.text == "🔧 Настройки")
@@ -154,15 +144,13 @@ async def settings_menu(m: types.Message):
     kwh = f"{u[3]:g} ₽" if u and u[3] else "не задано"
     asicp = (f"{u[4]:,.0f} ₽".replace(",", " ")) if u and u[4] else "не задано"
     await m.answer(
-        "🔧 *Твои настройки*\n"
+        "🔧 Твои настройки\n"
         "━━━━━━━━━━━━━━━━━━━\n"
-        f"⚡️ Цена кВт·ч: *{kwh}*\n"
-        f"🏷 Цена ASIC: *{asicp}*\n\n"
+        f"⚡️ Цена кВт·ч: {kwh}\n"
+        f"🏷 Цена ASIC: {asicp}\n\n"
         "Что хочешь изменить?",
         reply_markup=settings_kb(),
-        parse_mode="Markdown",
-    )
-    @dp.callback_query(F.data == "set:kwh")
+    )@dp.callback_query(F.data == "set:kwh")
 async def cb_set_kwh(c: types.CallbackQuery, state: FSMContext):
     await c.message.answer("⚡️ Введи цену кВт·ч в ₽ (например: 4)")
     await state.set_state(SettingsFSM.kwh)
@@ -221,95 +209,4 @@ async def calc_start(m: types.Message, state: FSMContext):
 async def cb_asic(c: types.CallbackQuery, state: FSMContext):
     key = c.data.split(":", 1)[1]
     if key == "manual":
-        await c.message.answer("Введи хешрейт в TH/s 💪\nНапример: 100, 200, 126")
-        await state.set_state(Calc.th)
-        await c.answer()
-        return
-
-    asic = ASICS.get(key)
-    if not asic:
-        await c.answer("Не нашёл этот ASIC", show_alert=True)
-        return
-
-    th = asic["th"]
-    watts = asic["w"]
-    u = db.get_user(c.from_user.id)
-    if not u or not u[3]:
-        await state.update_data(th=th, watts=watts)
-        await c.message.answer(
-            "⚡️ Сколько у тебя стоит 1 кВт·ч в ₽?\n"
-            "Введи число (например: 4)\n\n"
-            "Я запомню для всех будущих расчётов.\n"
-            "Поменять можно в 🔧 Настройках."
-        )
-        await state.set_state(Calc.first_kwh)
-        await c.answer()
-        return
-
-    await state.clear()
-    await c.answer()
-    await do_calc(c.message, th, watts)
-
-
-@dp.message(Calc.th)
-async def calc_th(m: types.Message, state: FSMContext):
-    try:
-        th = float(m.text.replace(",", "."))
-    except Exception:
-        await m.answer("❌ Это не число.\nПример: 100 (TH/s) 👇")
-        return
-    await state.update_data(th=th)
-    await m.answer(
-        "🔌 Шаг 2/2 — потребление 🔋\n\n"
-        "Введи мощность ASIC в ваттах ⚡️\n"
-        "Примеры:\n3250\n3500\n3276\n\n"
-        "Просто отправь число 👇"
-    )
-    await state.set_state(Calc.watts)
-
-
-@dp.message(Calc.watts)
-async def calc_watts(m: types.Message, state: FSMContext):
-    try:
-        watts = float(m.text.replace(",", "."))
-    except Exception:
-        await m.answer("❌ Это не число.\nПример: 3500 (Вт) 👇")
-        return
-    data = await state.get_data()
-    th = data.get("th")
-    u = db.get_user(m.from_user.id)
-    if not u or not u[3]:
-        await state.update_data(watts=watts)
-        await m.answer(
-            "⚡️ Сколько у тебя стоит 1 кВт·ч в ₽?\n"
-            "Введи число (например: 4)"
-        )
-        await state.set_state(Calc.first_kwh)
-        return
-    await state.clear()
-    await do_calc(m, th, watts)
-
-
-@dp.message(Calc.first_kwh)
-async def first_kwh(m: types.Message, state: FSMContext):
-    try:
-        v = float(m.text.replace(",", "."))
-    except Exception:
-        await m.answer("❌ Это не число. Пример: 4")
-        return
-    db.set_kwh(m.from_user.id, v)
-    data = await state.get_data()
-    th = data.get("th")
-    watts = data.get("watts")
-    await state.clear()
-    await m.answer(f"✅ Запомнил: {v:g} ₽/кВт·ч")
-    if th and watts:
-        await do_calc(m, th, watts)
-
-
-async def main():
-    await dp.start_polling(bot)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+        await c.message.answer("Введи
