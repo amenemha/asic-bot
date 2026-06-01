@@ -20,6 +20,15 @@ async def btc_usd():
             except: pass
     return sum(vals)/len(vals) if vals else None
 
+async def eth_usd():
+    async with aiohttp.ClientSession() as s:
+        vals = []
+        j = await _get_json(s, "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd")
+        if j and "ethereum" in j: vals.append(float(j["ethereum"]["usd"]))
+        j = await _get_json(s, "https://min-api.cryptocompare.com/data/price?fsym=ETH&tsyms=USD")
+        if j and "USD" in j: vals.append(float(j["USD"]))
+    return sum(vals)/len(vals) if vals else None
+
 async def usd_rub():
     async with aiohttp.ClientSession() as s:
         j = await _get_json(s, "https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=rub")
