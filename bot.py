@@ -1,4 +1,5 @@
-import asyncio, os, json
+import os
+import asyncio
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
@@ -10,7 +11,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
-import db, rates, calc
+import db
+import rates
+import calc
 
 load_dotenv()
 db.init()
@@ -21,13 +24,12 @@ dp = Dispatcher(storage=MemoryStorage())
 PREMIUM_ON = os.getenv("PREMIUM_ENABLED", "0") == "1"
 FREE_LIMIT = int(os.getenv("FREE_LIMIT", "5"))
 
-# Список ASIC (пока заглушки, потом заменишь реальные)
 ASICS = {
-    "s19":  {"name": "🟦 Antminer S19",   "th": 100, "w": 3250},
-    "s21":  {"name": "🟦 Antminer S21",   "th": 200, "w": 3500},
-    "m50":  {"name": "🟧 Whatsminer M50", "th": 126, "w": 3276},
-    "x3":   {"name": "🟨 Производитель 3", "th": 150, "w": 3300},
-    "x4":   {"name": "🟩 Производитель 4", "th": 180, "w": 3400},
+    "s19": {"name": "🟦 Antminer S19", "th": 100, "w": 3250},
+    "s21": {"name": "🟦 Antminer S21", "th": 200, "w": 3500},
+    "m50": {"name": "🟧 Whatsminer M50", "th": 126, "w": 3276},
+    "x3":  {"name": "🟨 Производитель 3", "th": 150, "w": 3300},
+    "x4":  {"name": "🟩 Производитель 4", "th": 180, "w": 3400},
 }
 
 
@@ -42,7 +44,12 @@ def main_kb():
 
 
 def asics_kb():
-    rows = [[InlineKeyboardButton(text=f"{v['name']} — {v['th']} TH/s", callback_data=f"asic:{k}")] for k, v in ASICS.items()]
+    rows = []
+    for k, v in ASICS.items():
+        rows.append([InlineKeyboardButton(
+            text=f"{v['name']} — {v['th']} TH/s",
+            callback_data=f"asic:{k}",
+        )])
     rows.append([InlineKeyboardButton(text="✏️ Ввести вручную", callback_data="asic:manual")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -65,6 +72,48 @@ class SettingsFSM(StatesGroup):
     asic = State()
 
 
+async def do_calc(m: types.Message, th: float, watts: float):
+    u = db.get_user(m.from_user.id)
+    kwh_price = u[3] if u and u[3] else 0
+    asic_price = u[4] if u and u[4] else 0
+
+    btc_v = await rates.btc_usd()
+    rub_v = await rates.usd_rub()
+    diff_v = await rates.difficulty()
+
+    if not (btc_v and rub_v and diff_v):
+        await m.answer("⚠️ Не удалось получить курсы. Попробуй позже.", reply_markup=main_kb())
+        return
+
+    r = calc.calc(th, watts, kwh_price, asic_price, btc_v, rub_v, diff_v)
+    db.log_req(m.from_user.id, "calc", f"{th}/{watts}")
+
+    text = (
+        f"📊 *Расчёт* — {th:g} TH/s ⛏  {watts:g} Вт ⚡️\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"💰 Доход/сутки:\n"
+        f"   {r['btc_day']:.8f} ₿\n"
+        f"   ${r['usd_day']:.2f}  |  {r['rub_day']:,.0f} ₽\n\n"
+        f"🔌 Электричество/сутки: {r['elec_day']:,.0f} ₽"
+    )
+    if kwh_price:
+        text += f" ({kwh_price:g} ₽/кВт·ч)"
+    text += (
+        f"\n📈 Чистая прибыль/сутки: *{r['profit_day']:,.0f} ₽*\n\n"
+        f"🗓 В месяц: {r['month']:,.0f} ₽\n"
+        f"📅 В год: {r['year']:,.0f} ₽"
+    )
+    if r["payback_days"]:
+        text += f"\n\n⏳ Окупаемость: *{r['payback_days']:,.0f} дней* (~{r['payback_days']/30:.1f} мес) ✅"
+    elif asic_price:
+        text += "\n\n⚠️ Окупаемость: убыточно при текущих параметрах"
+    else:
+        text += "\n\nℹ️ Укажи цену ASIC в 🔧 Настройках для расчёта окупаемости"
+
+    text = text.replace(",", " ")
+    await m.answer(text, reply_markup=main_kb(), parse_mode="Markdown")
+
+
 @dp.message(CommandStart())
 async def start(m: types.Message):
     db.upsert_user(m.from_user.id, m.from_user.username, m.from_user.first_name)
@@ -84,11 +133,11 @@ async def show_rates(m: types.Message):
     btc = await rates.btc_usd()
     eth = await rates.eth_usd()
     rub = await rates.usd_rub()
-    text = "💹 *Курс*\n━━━━━━━━━\n"
-    text += f"{btc:,.0f} BTC/USDT\n" if btc else "BTC/USDT — нет данных\n"
-    text += f"{rub:.2f} RUB/USDT\n" if rub else "RUB/USDT — нет данных\n"
-    text += f"{eth:,.0f} ETH/USDT" if eth else "ETH/USDT — нет данных"
-    await m.answer(text, parse_mode="Markdown")
+    lines = ["💹 *Курс*", "━━━━━━━━━"]
+    lines.append(f"{btc:,.0f} BTC/USDT".replace(",", " ") if btc else "BTC/USDT — нет данных")
+    lines.append(f"{rub:.2f} RUB/USDT" if rub else "RUB/USDT — нет данных")
+    lines.append(f"{eth:,.0f} ETH/USDT".replace(",", " ") if eth else "ETH/USDT — нет данных")
+    await m.answer("\n".join(lines), parse_mode="Markdown")
 
 
 @dp.message(F.text == "⚙️ Аппараты")
@@ -102,10 +151,11 @@ async def asics_info(m: types.Message):
 @dp.message(F.text == "🔧 Настройки")
 async def settings_menu(m: types.Message):
     u = db.get_user(m.from_user.id)
-    kwh = f"{u[3]} ₽" if u and u[3] else "не задано"
-    asicp = f"{u[4]:,.0f} ₽".replace(",", " ") if u and u[4] else "не задано"
+    kwh = f"{u[3]:g} ₽" if u and u[3] else "не задано"
+    asicp = (f"{u[4]:,.0f} ₽".replace(",", " ")) if u and u[4] else "не задано"
     await m.answer(
-        "🔧 *Твои настройки*\n━━━━━━━━━━━━━━━━━━━\n"
+        "🔧 *Твои настройки*\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
         f"⚡️ Цена кВт·ч: *{kwh}*\n"
         f"🏷 Цена ASIC: *{asicp}*\n\n"
         "Что хочешь изменить?",
@@ -137,7 +187,7 @@ async def settings_set_kwh(m: types.Message, state: FSMContext):
         return
     db.set_kwh(m.from_user.id, v)
     await state.clear()
-    await m.answer(f"✅ Сохранено: {v} ₽/кВт·ч", reply_markup=main_kb())
+    await m.answer(f"✅ Сохранено: {v:g} ₽/кВт·ч", reply_markup=main_kb())
 
 
 @dp.message(SettingsFSM.asic)
@@ -149,7 +199,8 @@ async def settings_set_asic(m: types.Message, state: FSMContext):
         return
     db.set_asic_price(m.from_user.id, v)
     await state.clear()
-    await m.answer(f"✅ Сохранено: {v:,.0f} ₽".replace(",", " "), reply_markup=main_kb())
+    s = f"{v:,.0f} ₽".replace(",", " ")
+    await m.answer(f"✅ Сохранено: {s}", reply_markup=main_kb())
 
 
 @dp.message(F.text == "🧮 Рассчитать")
@@ -170,4 +221,23 @@ async def calc_start(m: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("asic:"))
 async def cb_asic(c: types.CallbackQuery, state: FSMContext):
-    key = c.data.
+    key = c.data.split(":", 1)[1]
+    if key == "manual":
+        await c.message.answer(
+            "Введи хешрейт в TH/s 💪\n"
+            "Например: 100, 200, 126"
+        )
+        await state.set_state(Calc.th)
+        await c.answer()
+        return
+
+    asic = ASICS.get(key)
+    if not asic:
+        await c.answer("Не нашёл этот ASIC", show_alert=True)
+        return
+
+    th = asic["th"]
+    watts = asic["w"]
+
+    u = db.get_user(c.from_user.id)
+    if
