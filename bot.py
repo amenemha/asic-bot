@@ -71,7 +71,7 @@ class SettingsFSM(StatesGroup):
     kwh = State()
     asic = State() 
     
-    async def do_calc(m: types.Message, th: float, watts: float):
+async def do_calc(m: types.Message, th: float, watts: float):
     u = db.get_user(m.from_user.id)
     kwh_price = u[3] if u and u[3] else 0
     asic_price = u[4] if u and u[4] else 0
