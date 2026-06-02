@@ -75,7 +75,6 @@ async def do_calc(m: types.Message, th: float, watts: float):
     u = db.get_user(m.from_user.id)
     kwh_price = u[3] if u and u[3] else 0
     asic_price = u[4] if u and u[4] else 0
-
     btc_v = await rates.btc_usd()
     rub_v = await rates.usd_rub()
     diff_v = await rates.difficulty()
